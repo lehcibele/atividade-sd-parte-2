@@ -11,11 +11,11 @@ import requests
 app = FastAPI()
 
 myProcessId = 0
-N = 3  # número de réplicas (ajuste conforme processes)
+N = 3 # número total de processos
 V = []  # vetor de relógios locais
-posts = {}  # evtId -> Event
-replies = defaultdict(list)  # parentEvtId -> [Event]
-buffer = deque()  # eventos aguardando causalidade ou dependências
+posts = {}  
+replies = defaultdict(list)  
+buffer = deque()  
 processes = [
     "localhost:8080",
     "localhost:8081",
@@ -32,14 +32,12 @@ class Event(BaseModel):
 
 @app.post("/post")
 def post(msg: Event):
-    # Emissão local: incrementa vetor e carimba
     if msg.processId == myProcessId:
         V[myProcessId] += 1
         msg.vc = V.copy()
 
     deliver_or_buffer(msg)
 
-    # Reencaminhar
     payload = msg.model_dump()  
     for i, addr in enumerate(processes):
         if i == myProcessId:
@@ -55,36 +53,27 @@ def share(msg: Event):
 def async_send(url: str, payload: dict):
     def worker():
         try:
-            # (Opcional) atraso controlado
-            # if myProcessId == 0:
-            #     time.sleep(0.5)
             requests.post(url, json=payload, timeout=2)
         except Exception as e:
             print(f"[WARN] send to {url} failed: {e}")
     threading.Thread(target=worker, daemon=True).start()
 
-# casualidade
 def can_deliver(msg: Event) -> bool:
-    """Verifica regra de causalidade vetorial para evento do autor i."""
     if msg.vc is None or len(msg.vc) != N:
         return False
     i = msg.processId
-    # Regra: para k != i: msg.vc[k] <= V[k]
     for k in range(N):
         if k == i:
             continue
         if msg.vc[k] > V[k]:
             return False
-    # Regra: msg.vc[i] == V[i] + 1
     if msg.vc[i] != V[i] + 1:
         return False
-    # Dependência semântica: se é reply, o post pai já deve estar entregue
     if msg.parentEvtId is not None and msg.parentEvtId not in posts:
         return False
     return True
 
 def try_deliver_buffer():
-    """Tenta entregar eventos do buffer que agora podem ser entregues."""
     delivered_any = True
     while delivered_any:
         delivered_any = False
@@ -100,7 +89,6 @@ def try_deliver_buffer():
 def deliver_or_buffer(msg: Event):
     if can_deliver(msg):
         apply_event(msg)
-        # Após entregar algo, novas dependências podem ser satisfeitas
         try_deliver_buffer()
     else:
         buffer.append(msg)
@@ -108,11 +96,8 @@ def deliver_or_buffer(msg: Event):
 
 
 def apply_event(msg: Event):
-    """Aplica evento ao estado e atualiza relógio local."""
     i = msg.processId
-    # Atualiza relógio local: V[i] = msg.vc[i]
     V[i] = msg.vc[i]
-    # Aplica no estado
     if msg.parentEvtId is None:
         posts[msg.evtId] = msg
     else:

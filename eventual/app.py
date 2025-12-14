@@ -30,11 +30,9 @@ class Event(BaseModel):
     text: str
     timestamp: Optional[int] = None  # gerado pelo autor local
 
-
 @app.post("/post")
 def post(msg: Event):
     global timestamp
-    # Evento local?
     if msg.processId == myProcessId:
         timestamp += 1
         msg.timestamp = timestamp
@@ -51,7 +49,6 @@ def post(msg: Event):
 
 @app.post("/share")
 def share(msg: Event):
-    # Não altera timestamps do autor
     processMsg(msg)
     return {"status": "ok", "receivedBy": myProcessId}
 
@@ -59,9 +56,6 @@ def share(msg: Event):
 def async_send(url: str, payload: dict):
     def worker():
         try:
-            # (Opcional) simula atraso em uma réplica específica
-            # if myProcessId == 0:
-            #     time.sleep(0.5)
             requests.post(url, json=payload, timeout=2)
         except Exception as e:
             print(f"[WARN] send to {url} failed: {e}")
@@ -73,13 +67,13 @@ def processMsg(msg: Event):
     # Aceita qualquer ordem (eventual)
     if msg.parentEvtId is None:
         posts[msg.evtId] = msg
-        # Se havia órfãs esperando esse pai, mova para replies
+        # Se tem órfãs esperando pelo pai, mova para replies
         if msg.evtId in orphans:
             for r in orphans[msg.evtId]:
                 replies[msg.evtId].append(r)
             del orphans[msg.evtId]
     else:
-        # Se o pai já existe, anexar; senão, registrar como órfã
+        # Se o pai já existe, anexar, senão registrar como órfã
         if msg.parentEvtId in posts:
             replies[msg.parentEvtId].append(msg)
         else:
